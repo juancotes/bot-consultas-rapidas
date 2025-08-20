@@ -1,346 +1,550 @@
-<!-- ==== CHAT PANEL (pegar antes de </body>) ==== -->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>GeoVisor + Chat SIG</title>
+
+<!-- Leaflet & Esri Leaflet -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="https://unpkg.com/esri-leaflet@3.0.11/dist/esri-leaflet.js" crossorigin=""></script>
+
 <style>
   :root{
-    --chat-bg:#0b1020;        /* consistente con tu app oscura */
-    --chat-panel:#111a34;
-    --chat-muted:#7d8fb3;
-    --chat-accent:#60a5fa;
-    --chat-user:#1f2937;
-    --chat-assistant:#0f172a;
-    --ring:#334155;
+    /* Tema oscuro sobrio */
+    --bg:#0b1020;
+    --panel:#111a34;
+    --muted:#99a3b8;
+    --ink:#e6edf6;
+    --accent:#60a5fa;
+    --ok:#17c964;
+    --warn:#f5a524;
+    --err:#ef4444;
+    --ring:#24324f;
+    --chip:#1f2a44;
+    --shadow:0 24px 60px rgba(0,0,0,.45);
+    --safe-top:env(safe-area-inset-top, 0px);
+    --safe-bottom:env(safe-area-inset-bottom, 0px);
+  }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--ink);font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;}
+  #app{display:grid;grid-template-columns: 300px 1fr; height:100%;}
+  #sidebar{
+    background:var(--panel); border-right:1px solid var(--ring); display:flex; flex-direction:column; gap:10px; padding:12px;
+  }
+  #map{ position:relative; }
+  #map > .leaflet-container{ height:100%; width:100%; }
+
+  h3{margin:0 0 8px 0; font-size:15px;}
+  .muted{ color: var(--muted); }
+  .btn{ background:var(--accent); color:#081427; border:0; border-radius:10px; padding:8px 12px; font-weight:600; cursor:pointer; }
+  .btn.secondary{ background:#1c2b4e; color:#cbd5e1; border:1px solid var(--ring); }
+  .row{ display:flex; gap:8px; align-items:center; }
+
+  /* Buscador */
+  #search{
+    display:grid; gap:6px; border:1px solid var(--ring); border-radius:12px; padding:10px; background:#0d142a;
+  }
+  #q{
+    padding:10px 12px; border-radius:10px; border:1px solid var(--ring); outline:none; background:#0b1020; color:var(--ink);
+  }
+  #suggest{ list-style:none; margin:0; padding:0; border:1px solid var(--ring); border-radius:10px; background:#0b1020; display:none; max-height:240px; overflow:auto; }
+  #suggest li{ padding:8px 10px; cursor:pointer; border-bottom:1px solid #0f1a34;}
+  #suggest li:hover{ background:#0e1934; }
+
+  /* Capas */
+  #layers{ display:grid; gap:6px; }
+  .layer-item{ display:flex; align-items:center; justify-content:space-between; gap:6px; padding:8px; border:1px solid var(--ring); border-radius:10px; background:#0d142a; }
+  .layer-item label{ display:flex; align-items:center; gap:8px; cursor:pointer; }
+
+  /* Panel superior de resultados */
+  #topbar{
+    position:fixed; left:50%; transform:translateX(-50%); top:calc(8px + var(--safe-top));
+    z-index:700; background:#0d142a; border:1px solid var(--ring); border-radius:12px; padding:8px 12px;
+    max-width:min(820px, 92vw); box-shadow:var(--shadow);
+  }
+  #results{ font-size:13px; }
+  .chip{ display:inline-block; background:var(--chip); border:1px solid var(--ring); padding:2px 8px; border-radius:999px; margin:2px 4px 2px 0; }
+
+  /* Marcador */
+  .pin{ background:#ef4444; width:12px; height:12px; border-radius:999px; border:2px solid #fff; box-shadow:0 2px 8px rgba(0,0,0,.35); }
+
+  /* Botones mapa */
+  .map-ctl{
+    position:fixed; right:12px; top:calc(12px + var(--safe-top));
+    z-index:650; display:grid; gap:8px;
   }
 
-  #chat-toggle {
-    position: fixed; bottom: 16px; right: 16px; z-index: 9999;
-    width: 56px; height: 56px; border-radius: 999px; border: 1px solid #334155;
-    background: var(--chat-panel); color: white; display: grid; place-items: center;
-    box-shadow: 0 6px 24px rgba(0,0,0,.35); cursor: pointer;
+  /* Chat (integrado) */
+  #gchat-toggle{
+    position:fixed; right:16px; bottom:calc(16px + var(--safe-bottom)); z-index:9999;
+    width:56px; height:56px; border-radius:999px; background:#12224a; border:1px solid var(--ring);
+    color:#e5e7eb; display:grid; place-items:center; box-shadow:var(--shadow); cursor:pointer;
   }
-  #chat-toggle:hover { filter: brightness(1.1); }
+  #gchat{ position:fixed; right:16px; bottom:calc(84px + var(--safe-bottom)); z-index:9998;
+    width:min(380px, 94vw); max-height:70dvh; background:var(--panel); color:var(--ink); border:1px solid var(--ring); border-radius:16px; overflow:hidden; box-shadow:var(--shadow); display:none;
+    grid-template-rows:auto 1fr auto;
+  }
+  #gchat.open{ display:grid; }
+  #gchat-h{ display:flex; align-items:center; gap:8px; padding:10px 12px; border-bottom:1px solid var(--ring); background:#0d142a; }
+  #gchat-h h4{ margin:0; font-size:14px; font-weight:600; }
+  #gchat-b{ overflow:auto; padding:12px; display:flex; flex-direction:column; gap:10px; }
+  .gmsg{ display:grid; gap:6px; }
+  .gmsg .r{ font-size:11px; color:var(--muted); }
+  .gmsg .bb{ border:1px solid var(--ring); padding:10px 12px; border-radius:14px; line-height:1.35; }
+  .gmsg.user .bb{ background:#1a223e; }
+  .gmsg.assistant .bb{ background:#0f172a; }
+  .gcites{ font-size:12px; margin-top:6px; }
+  .gcites a{ color:var(--accent); text-decoration:underline; word-break:break-word; }
 
-  #chat-panel {
-    position: fixed; right: 16px; bottom: 80px; z-index: 9998;
-    width: 380px; max-height: 70dvh; background: var(--chat-panel); color: #e5e7eb;
-    border: 1px solid var(--ring); border-radius: 16px; display: none;
-    box-shadow: 0 20px 48px rgba(0,0,0,.45); overflow: hidden;
-  }
-  #chat-panel.open { display: grid; grid-template-rows: auto 1fr auto; }
+  #gchat-f{ border-top:1px solid var(--ring); padding:8px; display:grid; gap:6px; background:#0d142a; }
+  #gchat-hint{ display:none; }
+  #gchat-hint.on{ display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--muted); font-size:12px; }
+  #gchat-recover{ background:transparent; color:var(--accent); border:1px solid var(--accent); padding:6px 10px; border-radius:10px; cursor:pointer; }
 
-  #chat-head {
-    padding: 10px 12px; display: flex; align-items: center; gap: 8px;
-    border-bottom: 1px solid var(--ring); background: #0d142a;
-  }
-  #chat-head h4{ margin:0; font-size: 14px; font-weight:600; }
-  #chat-head .spacer { flex:1; }
-  #chat-body {
-    overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px;
-  }
-  .msg { display: grid; gap: 6px; }
-  .msg .role { font-size: 11px; color: var(--chat-muted); }
-  .msg .bubble {
-    border: 1px solid var(--ring); padding: 10px 12px; border-radius: 14px;
-    line-height: 1.3;
-  }
-  .msg.user   .bubble{ background: var(--chat-user); }
-  .msg.assistant .bubble{ background: var(--chat-assistant); }
-  .citations { font-size: 12px; margin-top: 6px; }
-  .citations a { color: var(--chat-accent); text-decoration: underline; word-break: break-word; }
+  #gchat-meta{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .gswitch{ display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); }
+  .gswitch input{ width:16px; height:16px; }
 
-  #chat-foot {
-    border-top: 1px solid var(--ring); padding: 8px; display: grid; gap: 6px;
-    background: #0d142a;
+  #gchat-ctrl{ display:grid; grid-template-columns:1fr auto; gap:6px; }
+  #gchat-in{
+    width:100%; min-height:40px; max-height:28dvh; resize:none;
+    padding:10px 12px; border-radius:12px; border:1px solid var(--ring);
+    background:#0b1020; color:var(--ink); outline:none;
   }
-  #chat-controls { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
-  #chat-input {
-    width: 100%; resize: none; min-height: 40px; max-height: 28dvh; padding: 10px 12px;
-    border-radius: 12px; border:1px solid var(--ring); outline:none; background:#0b1020; color:#e5e7eb;
-  }
-  #chat-send {
-    padding: 0 14px; border-radius: 12px; background: var(--chat-accent); border: none; color: #081427;
-    font-weight: 600; cursor: pointer;
-  }
-  #chat-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .switch { display:flex; align-items:center; gap:8px; font-size:12px; color: var(--chat-muted); }
-  .switch input{ width: 16px; height: 16px; }
+  #gchat-send{ padding:0 14px; border-radius:12px; background:var(--accent); border:none; color:#081427; font-weight:600; cursor:pointer; }
 
-  #history-bar { display:none; }
-  #history-bar.on { display:flex; align-items:center; justify-content: space-between; gap:8px; }
-  #btn-recover { background: transparent; color: var(--chat-accent); border: 1px solid var(--chat-accent); padding: 6px 10px; border-radius: 10px; cursor: pointer; }
-
-  /* Móvil: panel ocupa toda la pantalla y el toggle sube para no tapar teclado */
-  @media (max-width: 768px) {
-    #chat-panel { left: 0; right: 0; bottom: 0; top: 0; width: 100%; max-height: 100dvh; border-radius: 0; }
-    #chat-toggle { bottom: 20px; right: 20px; }
+  /* Responsive */
+  @media (max-width: 980px){
+    #app{ grid-template-columns: 1fr; }
+    #sidebar{ position:fixed; left:12px; top:calc(12px + var(--safe-top)); z-index:600; width:min(330px, 92vw); max-height: 70dvh; overflow:auto; border-radius:12px; }
+    #gchat{ left:12px; right:12px; bottom:calc(84px + var(--safe-bottom)); width:auto; max-height:64dvh; }
   }
 </style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <h3>GeoVisor</h3>
+    <div id="search">
+      <input id="q" type="text" placeholder="Dirección en Colombia, URL de Google Maps o lat,lon" />
+      <ul id="suggest"></ul>
+      <div class="row"><button class="btn" id="btn-search">Buscar</button><button class="btn secondary" id="btn-reset">Restablecer</button></div>
+      <small class="muted">Sugerencias: escribe 3+ caracteres para ver opciones. También puedes pegar enlaces de Google Maps o coordenadas (lat,lon).</small>
+    </div>
 
-<div id="chat-toggle" title="Abrir chat" aria-label="Abrir chat">
-  <!-- ícono simple -->
-  💬
+    <h3>Capas</h3>
+    <div id="layers"></div>
+    <small class="muted">Activa/desactiva capas. Al seleccionar un punto, el visor consulta los servicios y muestra intersecciones arriba.</small>
+  </aside>
+
+  <main id="map">
+    <div id="topbar" style="display:none;">
+      <div id="results"></div>
+    </div>
+    <div class="map-ctl">
+      <button id="btn-locate" class="btn secondary">Mi ubicación</button>
+    </div>
+  </main>
 </div>
 
-<div id="chat-panel" role="dialog" aria-label="Chat SIG">
-  <div id="chat-head">
+<!-- Chat -->
+<button id="gchat-toggle" title="Abrir chat">💬</button>
+<div id="gchat" role="dialog" aria-label="Consultas por chat">
+  <div id="gchat-h">
     <h4>Consultas por chat</h4>
-    <div class="spacer"></div>
-    <button id="chat-close" title="Cerrar" style="background:transparent;border:0;color:#e5e7eb;font-size:16px;cursor:pointer;">✕</button>
+    <div style="flex:1"></div>
+    <button id="gchat-close" class="btn secondary">✕</button>
   </div>
-
-  <div id="chat-body" role="log" aria-live="polite" aria-relevant="additions">
-    <!-- Mensaje de bienvenida -->
-  </div>
-
-  <div id="chat-foot">
-    <div id="history-bar">
-      <small class="muted">Has hecho varias consultas. Para mejorar el contexto, te recomiendo <b>recuperar tu historial</b>.</small>
-      <button id="btn-recover">Recuperar historial</button>
+  <div id="gchat-b"></div>
+  <div id="gchat-f">
+    <div id="gchat-hint"><span>Has hecho varias consultas. Te recomiendo <b>recuperar tu historial</b>.</span><button id="gchat-recover">Recuperar</button></div>
+    <div id="gchat-meta">
+      <label class="gswitch"><input id="gchat-cites" type="checkbox" /> Mostrar enlaces de consulta</label>
+      <small style="color:var(--muted)">Respuestas solo con datos disponibles</small>
     </div>
-
-    <div id="chat-meta">
-      <label class="switch" title="Incluir enlaces de consulta en la respuesta">
-        <input id="sw-citations" type="checkbox" />
-        <span>Mostrar enlaces de consulta</span>
-      </label>
-      <small class="muted" style="color:var(--chat-muted);">Solo Colombia / OSM</small>
-    </div>
-
-    <div id="chat-controls">
-      <textarea id="chat-input" placeholder="Escribe una dirección, una URL de Google Maps o una pregunta…" rows="2"></textarea>
-      <button id="chat-send">Enviar</button>
+    <div id="gchat-ctrl">
+      <textarea id="gchat-in" rows="2" placeholder="Escribe una dirección, una URL de Google Maps o una pregunta…"></textarea>
+      <button id="gchat-send">Enviar</button>
     </div>
   </div>
 </div>
 
 <script>
-/* ===== CONFIG ===== */
-const CHAT_ENDPOINT = "https://TU-WORKER.tu-subdominio.workers.dev/chat"; // ← pon aquí tu Worker
-const CHAT_KEY = "geoChatHistory:v1";
-const HISTORY_SUGGEST_TURNS = 6;
+/* ================== CONFIG ================== */
+// 1) Cambia esto por la URL de tu Worker Cloudflare
+const CHAT_ENDPOINT = "https://TU-WORKER.tu-subdominio.workers.dev/chat";
 
-/* ===== Helpers UI ===== */
-const $ = (sel) => document.querySelector(sel);
-const chatPanel = $("#chat-panel");
-const chatBody  = $("#chat-body");
-const chatToggle= $("#chat-toggle");
-const chatClose = $("#chat-close");
-const chatInput = $("#chat-input");
-const chatSend  = $("#chat-send");
-const swCite    = $("#sw-citations");
-const historyBar= $("#history-bar");
-const btnRecover= $("#btn-recover");
+// 2) Capas (pon aquí tus URLs reales). id debe ser único.
+const LAYER_DEFS = [
+  // ==== EJEMPLOS / PLACEHOLDERS ====
+  { id:"RUNAP",   name:"Áreas protegidas RUNAP", url:"https://.../FeatureServer/0" },
+  { id:"RESFORE", name:"Reserva Forestal (Ley 2)", url:"https://.../FeatureServer/0" },
+  { id:"RESGIND", name:"Resguardos Indígenas", url:"https://.../FeatureServer/0" },
+  { id:"CCOMUN",  name:"Consejos Comunitarios", url:"https://.../FeatureServer/0" },
+  { id:"ZRC",     name:"Zonas de Reserva Campesina", url:"https://.../FeatureServer/0" },
+  { id:"GOBFOR",  name:"Gobernanza Forestal", url:"https://.../FeatureServer/0" }
+  // Puedes añadir más; solo respeta {id, name, url}
+];
 
-function openChat(){ chatPanel.classList.add("open"); chatInput.focus(); }
-function closeChat(){ chatPanel.classList.remove("open"); }
-chatToggle.addEventListener("click", openChat);
-chatClose.addEventListener("click", closeChat);
+/* ================== MAPA BASE ================== */
+let map = L.map(document.createElement('div'), { zoomControl: true });
+document.getElementById('map').appendChild(map.getContainer());
+map.setView([4.6,-74.1], 6);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19, attribution:'© OSM'}).addTo(map);
 
-/* Ajuste al teclado móvil */
-if (window.visualViewport) {
-  visualViewport.addEventListener("resize", () => {
-    const offset = (window.innerHeight - visualViewport.height);
-    chatPanel.style.bottom = offset > 0 ? `${offset}px` : "0";
+// Marcador principal
+let mainMarker = null;
+function placeMarker(latlng){
+  if (mainMarker) mainMarker.remove();
+  mainMarker = L.marker(latlng, { draggable:false, icon:L.divIcon({className:'', html:'<div class="pin"></div>', iconSize:[16,16], iconAnchor:[8,8]}) }).addTo(map);
+}
+
+// Clic en mapa → consulta
+map.on('click', async (e)=>{ placeMarker(e.latlng); await queryAllLayers(e.latlng); openTopResults(); });
+
+/* ================== CAPAS ================== */
+const featureLayers = {};  // id -> L.esri.featureLayer
+const layerChecks = {};    // id -> checkbox DOM
+
+function ensureLayer(def){
+  if (featureLayers[def.id]) return featureLayers[def.id];
+  const fl = L.esri.featureLayer({
+    url:def.url,
+    where:"1=1",
+    simplifyFactor:0.5,
+    precision:5,
+    style:{ color:"#60a5fa", weight:1, fill:false }
+  });
+  featureLayers[def.id] = fl;
+  return fl;
+}
+
+function toggleLayer(id, on){
+  const def = LAYER_DEFS.find(d=>d.id===id); if (!def) return;
+  const fl = ensureLayer(def);
+  if (on){ if (!map.hasLayer(fl)) fl.addTo(map); }
+  else{ if (map.hasLayer(fl)) map.removeLayer(fl); }
+  if (layerChecks[id]) layerChecks[id].checked = !!on;
+}
+
+function resyncCheckboxes(){
+  LAYER_DEFS.forEach(d=>{
+    const on = map.hasLayer(featureLayers[d.id]);
+    if (layerChecks[d.id]) layerChecks[d.id].checked = on;
   });
 }
 
-/* Toast fallback (si no tienes uno global ya) */
-function showToast(text, level="info"){
-  if (window.showAppToast){ window.showAppToast(text, level); return; }
-  // fallback mini-toast
-  const t = document.createElement("div");
-  t.style.position="fixed"; t.style.top="12px"; t.style.left="50%"; t.style.transform="translateX(-50%)";
-  t.style.background= level==="error"?"#7f1d1d": level==="warn"?"#78350f":"#1f2937";
-  t.style.color="#fff"; t.style.padding="8px 12px"; t.style.borderRadius="10px"; t.style.zIndex=99999;
-  t.style.border="1px solid #334155";
-  t.textContent = text;
-  document.body.appendChild(t);
-  setTimeout(()=> t.remove(), 3200);
+/* render UI capas */
+(function renderLayersUI(){
+  const box = document.getElementById('layers');
+  box.innerHTML = "";
+  LAYER_DEFS.forEach(def=>{
+    const row = document.createElement('div'); row.className='layer-item';
+    const label = document.createElement('label');
+    const cb = document.createElement('input'); cb.type='checkbox'; cb.id='layer_'+def.id;
+    const span = document.createElement('span'); span.textContent = def.name;
+    label.appendChild(cb); label.appendChild(span);
+    const btn = document.createElement('button'); btn.className='btn secondary'; btn.textContent='Zoom';
+    row.appendChild(label); row.appendChild(btn); box.appendChild(row);
+    layerChecks[def.id]=cb;
+
+    cb.addEventListener('change', ()=> toggleLayer(def.id, cb.checked));
+    btn.addEventListener('click', ()=>{
+      const fl = ensureLayer(def); if (!map.hasLayer(fl)) fl.addTo(map);
+      try{ fl.query().bounds((err, latlngbounds)=>{ if(!err && latlngbounds) map.fitBounds(latlngbounds); }); }catch{}
+    });
+  });
+})();
+
+/* ================== BUSCADOR ================== */
+const input = document.getElementById('q');
+const suggest = document.getElementById('suggest');
+const btnSearch = document.getElementById('btn-search');
+const btnReset = document.getElementById('btn-reset');
+
+let suggestTimer = null;
+input.addEventListener('input', ()=>{
+  clearTimeout(suggestTimer);
+  const val = input.value.trim();
+  if (val.length<3){ suggest.style.display='none'; suggest.innerHTML=''; return; }
+  suggestTimer = setTimeout(()=> fetchSuggest(val), 250);
+});
+suggest.addEventListener('click', (e)=>{
+  const li = e.target.closest('li'); if(!li) return;
+  input.value = li.dataset.label; suggest.style.display='none';
+  goSearch();
+});
+btnSearch.addEventListener('click', goSearch);
+btnReset.addEventListener('click', clearAndReset);
+
+async function fetchSuggest(q){
+  // OSM Nominatim: solo CO
+  try{
+    const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=co&limit=6&addressdetails=0&q=${encodeURIComponent(q)}`;
+    const r = await fetch(url, { headers:{"Accept-Language":"es"} });
+    const js = await r.json();
+    suggest.innerHTML = js.map(j=>`<li data-lat="${j.lat}" data-lon="${j.lon}" data-label="${j.display_name}">${j.display_name}</li>`).join('');
+    suggest.style.display = js.length ? 'block' : 'none';
+  }catch{ suggest.style.display='none'; }
 }
 
-/* ===== Historial local ===== */
-function loadHistory(){ try{ return JSON.parse(localStorage.getItem(CHAT_KEY)||"[]"); }catch{ return []; } }
-function saveHistory(h){ localStorage.setItem(CHAT_KEY, JSON.stringify(h.slice(-40))); }
-function renderHistoryToUI(h){
-  chatBody.innerHTML = "";
-  renderWelcomeIfEmpty(h);
-  for (const m of h) {
-    if (m.role==="assistant") renderChatBubble("assistant", m.text, m.citations);
-    if (m.role==="user") renderChatBubble("user", m.text);
-  }
-  chatBody.scrollTop = chatBody.scrollHeight;
+function parseGMapsUrl(u){
+  try{
+    const url = new URL(u);
+    const at = url.href.match(/@(-?\d+(\.\d+)?),(-?\d+(\.\d+)?)/);
+    if (at) return { lat: parseFloat(at[1]), lon: parseFloat(at[3]) };
+    // Intento adicional: "maps.app.goo.gl" a veces viene con "q=lat,lon"
+    const q = url.searchParams.get('q');
+    if (q && /-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?/.test(q)) {
+      const [lat,lon] = q.split(',').map(Number); return { lat, lon };
+    }
+  }catch{}
+  return null;
 }
-function renderWelcomeIfEmpty(h){
-  if (!h || h.length===0) {
-    renderChatBubble("assistant", "Hola 👋. Dime una dirección, pega un enlace de Google Maps o **toca el mapa**. Con eso reviso las capas que intersectan y te respondo en lenguaje natural. Recuerda: solo puedo responder con base en los datos disponibles.");
-  }
-}
-function shouldSuggestReload(h){ return h.filter(m => m.role==="user").length >= HISTORY_SUGGEST_TURNS; }
 
-/* ===== Render de mensajes ===== */
-function renderChatBubble(role, text, citations){
-  const wrap = document.createElement("div");
-  wrap.className = `msg ${role}`;
-  const r = document.createElement("div");
-  r.className = "role";
-  r.textContent = role==="assistant" ? "Asistente" : "Tú";
-  const b = document.createElement("div");
-  b.className = "bubble";
-  b.innerHTML = sanitize(text).replace(/\n/g, "<br/>");
-  wrap.appendChild(r); wrap.appendChild(b);
-
-  if (Array.isArray(citations) && citations.length) {
-    const c = document.createElement("div");
-    c.className = "citations";
-    c.innerHTML = citations.map(ci => `<a href="${ci.url}" target="_blank" rel="noopener noreferrer">${sanitize(ci.label||ci.url)}</a>`).join("<br/>");
-    wrap.appendChild(c);
-  }
-
-  chatBody.appendChild(wrap);
-  chatBody.scrollTop = chatBody.scrollHeight;
-}
-function sanitize(s){ return (s||"").replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
-
-/* ===== Detección básica de entrada ===== */
-function isGMapsUrl(t){ try{ const u=new URL(t.trim()); return /google\.[^/]+\/maps/.test(u.hostname+u.pathname); }catch{return false;} }
-function looksLikeCoords(t){ return /-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?/.test(t); }
-function looksLikeAddress(t){ return !isGMapsUrl(t) && !looksLikeCoords(t) && t.trim().length>3; }
-
-/* ===== Integración con tu app SIG =====
-   Si ya tienes estas funciones globales, las usamos. Si no, hay fallbacks. */
-async function geocodeCO(q){
-  if (typeof window.geocodeCO === "function") return window.geocodeCO(q);
-  // Fallback simple con Nominatim (solo CO)
-  const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=co&limit=5&addressdetails=0&q=${encodeURIComponent(q)}`;
-  const r = await fetch(url, { headers:{ "Accept-Language":"es" }});
+async function geocodeOSM(q){
+  const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=co&limit=1&addressdetails=0&q=${encodeURIComponent(q)}`;
+  const r = await fetch(url, { headers:{"Accept-Language":"es"} });
   const js = await r.json();
   if (!js.length) return null;
   return { lat: parseFloat(js[0].lat), lon: parseFloat(js[0].lon) };
 }
-function parseGMapsUrl(u){
-  if (typeof window.parseGMapsUrl === "function") return window.parseGMapsUrl(u);
-  try{
-    const url = new URL(u);
-    // soporta .../@lat,lon,zoomz
-    const at = url.href.match(/@(-?\d+(\.\d+)?),(-?\d+(\.\d+)?)/);
-    if (at) return { lat: parseFloat(at[1]), lon: parseFloat(at[3]) };
-  }catch{}
-  return null;
-}
-function setMarker(lat, lon){
-  if (typeof window.setMarker === "function") return window.setMarker(lat, lon);
-  console.warn("setMarker no implementado en global");
-}
-function toggleLayer(id, on){
-  if (typeof window.toggleLayer === "function") return window.toggleLayer(id, on);
-  console.warn("toggleLayer no implementado:", id, on);
-}
-function resetView(){
-  if (typeof window.resetView === "function") return window.resetView();
-  if (window.map && typeof map.setView==="function") map.setView([4.5,-74.2], 6); // fallback Colombia
-}
-function autoToggleIntersecting(intersects){
-  if (typeof window.autoToggleIntersecting === "function") return window.autoToggleIntersecting(intersects);
-  // fallback: prende todo lo intersectado
-  (intersects||[]).forEach(i => toggleLayer(i.layerId, true));
-}
-async function queryAllLayersAt(lat, lon){
-  if (typeof window.queryAllLayersAt === "function") return await window.queryAllLayersAt(lat, lon);
-  console.warn("queryAllLayersAt no implementado. Devuelvo vacío.");
-  return { intersects: [], attributes: {}, bbox: null };
-}
 
-/* ===== Llamada al Worker /chat ===== */
-async function chatLLM(messages, ctx, wantCitations=false){
-  const res = await fetch(CHAT_ENDPOINT, {
-    method:"POST", headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify({ messages, context: ctx, wantCitations })
-  });
-  if (!res.ok) throw new Error("Error en /chat");
-  return await res.json(); // {reply, actions, citations?, alerts?}
-}
-
-/* ===== Aplicar acciones del modelo ===== */
-function applyActions(actions){
-  for (const a of actions||[]){
-    if (a.type==="set_marker") setMarker(a.lat, a.lon);
-    if (a.type==="toggle_layer") toggleLayer(a.layerId, a.on);
-    if (a.type==="fit_bounds" && window.map) {
-      const [[minX,minY,maxX,maxY]] = [[a.bbox[0],a.bbox[1],a.bbox[2],a.bbox[3]]];
-      map.fitBounds([[minY,minX],[maxY,maxX]], { padding:[30,30] });
-    }
-    if (a.type==="reset_view") resetView();
-    if (a.type==="nudge_reload_history") {
-      historyBar.classList.add("on");
-      showToast("Has realizado varias consultas. Recupera tu historial para mejorar las respuestas.", "info");
-    }
+async function goSearch(){
+  const t = input.value.trim();
+  if (!t) return;
+  let point = null;
+  if (/^https?:\/\//i.test(t) && /google\./i.test(t)) point = parseGMapsUrl(t);
+  else if (/-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?/.test(t)) {
+    const [lat,lon]=t.split(',').map(Number); point = {lat,lon};
+  } else {
+    point = await geocodeOSM(t);
   }
+  if (!point){ showAppToast("No encontré esa ubicación en Colombia.","warn"); return; }
+  const latlng = L.latLng(point.lat, point.lon);
+  placeMarker(latlng);
+  map.setView(latlng, 13);
+  await queryAllLayers(latlng);
+  openTopResults();
 }
 
-/* ===== Flujo principal del chat ===== */
-async function onUserMessage(){
-  const text = chatInput.value.trim();
-  if (!text) return;
-  chatInput.value = "";
-  renderChatBubble("user", text);
+/* ================== CONSULTA A CAPAS (intersección + atributos) ================== */
+const resultsBox = document.getElementById('results');
+const topbar = document.getElementById('topbar');
+window._lastRestContext = null;
 
-  const history = loadHistory();
-  // Preliminar: detectar punto
+async function queryAllLayers(latlng){
+  const intersects = [];
+  const attributes = {};
+  const bbox = [map.getBounds().getWest(), map.getBounds().getSouth(), map.getBounds().getEast(), map.getBounds().getNorth()];
+
+  // Consulta por capa (sin geometría; trae atributos)
+  const jobs = LAYER_DEFS.map(def => new Promise(resolve=>{
+    const q = L.esri.query({ url:def.url })
+      .intersects(latlng)
+      .returnGeometry(false)
+      .outFields(['*'])
+      .limit(50);
+
+    q.run((err, fc)=>{
+      if (err) { resolve({def, features:[], error:true}); return; }
+      const feats = (fc && fc.features) ? fc.features : [];
+      if (feats.length){
+        intersects.push({ layerId:def.id, name:def.name, sourceURL:def.url, queryURL:q._service && q._service.options && q._service.options.url ? q._service.options.url : def.url });
+        attributes[def.id] = feats.map(f => f.properties || f.attributes || {});
+      }
+      resolve({def, features:feats});
+    });
+  }));
+
+  await Promise.all(jobs);
+
+  // Encender capas intersectadas
+  autoToggleIntersecting(intersects);
+
+  // Render de resultados arriba
+  renderResults(intersects, attributes);
+
+  // Guardar contexto para el chat
+  window._lastRestContext = { point:{lat:latlng.lat, lon:latlng.lng}, rest:{ intersects, attributes, bbox } };
+
+  return { intersects, attributes, bbox };
+}
+
+function renderResults(intersects, attributes){
+  if (!intersects.length){
+    topbar.style.display='block';
+    resultsBox.innerHTML = `<span class="muted">No se encontraron intersecciones en las capas activas.</span>`;
+    return;
+  }
+  const html = [];
+  html.push(`<div><b>Intersecciones (${intersects.length})</b>:</div>`);
+  html.push(`<div style="margin:6px 0 8px 0;">${intersects.map(i=>`<span class="chip">${i.name}</span>`).join(' ')}</div>`);
+
+  // Primeros atributos por capa (muestra 3 campos si existen)
+  intersects.forEach(i=>{
+    const arr = attributes[i.layerId] || [];
+    if (!arr.length) return;
+    const first = arr[0];
+    const keys = Object.keys(first).slice(0,3);
+    html.push(`<div class="muted" style="margin-bottom:4px;"><b>${i.name}</b> — ${keys.map(k=>`<span class="chip">${k}: ${String(first[k]).slice(0,40)}</span>`).join(' ')}</div>`);
+  });
+  topbar.style.display='block';
+  resultsBox.innerHTML = html.join('');
+}
+
+function autoToggleIntersecting(intersects){
+  (intersects||[]).forEach(i=> toggleLayer(i.layerId, true));
+}
+
+function clearAndReset(){
+  if (mainMarker) { mainMarker.remove(); mainMarker=null; }
+  topbar.style.display='none'; resultsBox.innerHTML='';
+  LAYER_DEFS.forEach(d=> toggleLayer(d.id, false));
+  map.setView([4.6,-74.1], 6);
+}
+
+document.getElementById('btn-locate').addEventListener('click', ()=>{
+  if (!navigator.geolocation){ showAppToast("Geolocalización no disponible.","warn"); return; }
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    const latlng = L.latLng(pos.coords.latitude, pos.coords.longitude);
+    map.setView(latlng, 15); placeMarker(latlng); await queryAllLayers(latlng); openTopResults();
+  }, ()=> showAppToast("No se pudo obtener tu ubicación.","warn"), { enableHighAccuracy:true, timeout:7000, maximumAge:0 });
+});
+
+/* ================== TOAST ================== */
+function showAppToast(text, level="info"){
+  const t = document.createElement("div");
+  t.style.position="fixed"; t.style.top=`calc(8px + var(--safe-top))`; t.style.left="50%"; t.style.transform="translateX(-50%)";
+  t.style.background = level==="error" ? "#7f1d1d" : level==="warn" ? "#78350f" : "#1f2937";
+  t.style.color="#fff"; t.style.padding="8px 12px"; t.style.borderRadius="12px"; t.style.border="1px solid var(--ring)"; t.style.zIndex=99999;
+  t.textContent = text; document.body.appendChild(t); setTimeout(()=> t.remove(), 3200);
+}
+function openTopResults(){ topbar.style.display='block'; }
+
+/* ================== CHAT INTEGRADO ================== */
+const LS_KEY = "geoChatHistory:v1";
+const NUDGE_TURNS = 6;
+const chatPanel = document.getElementById('gchat');
+const chatLog = document.getElementById('gchat-b');
+const chatToggle = document.getElementById('gchat-toggle');
+const chatClose = document.getElementById('gchat-close');
+const chatIn = document.getElementById('gchat-in');
+const chatSend = document.getElementById('gchat-send');
+const chatCites = document.getElementById('gchat-cites');
+const chatHint = document.getElementById('gchat-hint');
+const chatRecover = document.getElementById('gchat-recover');
+
+function openChat(){ chatPanel.classList.add("open"); chatIn.focus(); }
+function closeChat(){ chatPanel.classList.remove("open"); }
+chatToggle.addEventListener("click", openChat);
+chatClose.addEventListener("click", closeChat);
+
+/* teclado móvil */
+if (window.visualViewport) {
+  visualViewport.addEventListener("resize", () => {
+    const off = window.innerHeight - visualViewport.height;
+    chatPanel.style.bottom = off>0 ? `calc(84px + ${off}px + var(--safe-bottom))` : `calc(84px + var(--safe-bottom))`;
+    chatToggle.style.bottom = off>0 ? `calc(16px + ${off}px + var(--safe-bottom))` : `calc(16px + var(--safe-bottom))`;
+  });
+}
+
+function loadHistory(){ try{ return JSON.parse(localStorage.getItem(LS_KEY)||"[]"); }catch{return[]} }
+function saveHistory(h){ localStorage.setItem(LS_KEY, JSON.stringify(h.slice(-40))); }
+function shouldNudge(h){ return h.filter(m=>m.role==="user").length >= NUDGE_TURNS; }
+function sanitize(s){ return (s||"").replace(/[<>&]/g, c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c])); }
+
+function renderChatBubble(role, text, citations){
+  const wrap = document.createElement("div"); wrap.className=`gmsg ${role}`;
+  const r = document.createElement("div"); r.className="r"; r.textContent = role==="assistant"?"Asistente":"Tú";
+  const b = document.createElement("div"); b.className="bb"; b.innerHTML = sanitize(text).replace(/\n/g,"<br/>");
+  wrap.appendChild(r); wrap.appendChild(b);
+  if (Array.isArray(citations) && citations.length){
+    const c = document.createElement("div"); c.className="gcites";
+    c.innerHTML = citations.map(ci => `<a href="${ci.url}" target="_blank" rel="noopener noreferrer">${sanitize(ci.label||ci.url)}</a>`).join("<br/>");
+    wrap.appendChild(c);
+  }
+  chatLog.appendChild(wrap); chatLog.scrollTop = chatLog.scrollHeight;
+}
+function renderWelcomeIfNeeded(h){
+  if (!h.length) renderChatBubble("assistant", "Hola 👋. Dime una dirección, pega un enlace de Google Maps o **toca el mapa**. Con eso reviso las capas que intersectan y te respondo en lenguaje natural. Recuerda: solo puedo responder con base en los datos disponibles.");
+}
+function renderHistory(h){
+  chatLog.innerHTML=""; renderWelcomeIfNeeded(h);
+  h.forEach(m=>{ if(m.role==="user") renderChatBubble("user", m.text); else if(m.role==="assistant") renderChatBubble("assistant", m.text, m.citations); });
+  if (shouldNudge(h)) chatHint.classList.add("on");
+}
+renderHistory(loadHistory());
+
+async function chatCall(messages, context, wantCitations){
+  const r = await fetch(CHAT_ENDPOINT, { method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ messages, context, wantCitations }) });
+  if (!r.ok) throw new Error("Error en /chat");
+  return await r.json();
+}
+
+function isGMapsUrl(t){ try{ const u=new URL(t.trim()); return /google\.[^/]+\/maps/.test(u.hostname+u.pathname); }catch{return false;} }
+function looksLikeCoords(t){ return /-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?/.test(t); }
+
+async function onChatSend(){
+  const text = chatIn.value.trim(); if(!text) return;
+  chatIn.value=""; renderChatBubble("user", text);
+
+  const hist = loadHistory();
+  // Detecta punto según entrada
   let point = null;
   if (isGMapsUrl(text)) point = parseGMapsUrl(text);
-  else if (looksLikeCoords(text)) {
-    const [lat,lon] = text.split(",").map(s=>parseFloat(s));
-    point = {lat,lon};
-  } else if (looksLikeAddress(text)) {
-    point = await geocodeCO(text);
-    if (!point) showToast("No encontré esa dirección en Colombia.", "warn");
-  }
+  else if (looksLikeCoords(text)) { const [lat,lon] = text.split(",").map(Number); point = {lat,lon}; }
+  else if (text.length>3) { const g = await geocodeOSM(text); if (g) point=g; }
 
-  // Contexto: si tengo punto, consulto capas y prendo intersectadas
-  let ctx = history.at(-1)?.ctx || {};
+  // Construye contexto (si hay punto consulta capas)
+  let ctx = hist.at(-1)?.ctx || {};
   if (point){
-    const { lat, lon } = point;
-    const rest = await queryAllLayersAt(lat, lon);
-    ctx = { point:{lat,lon}, rest, turn_count: (ctx.turn_count||0)+1 };
-    setMarker(lat, lon);
-    autoToggleIntersecting(rest?.intersects||[]);
+    const latlng = L.latLng(point.lat, point.lon);
+    placeMarker(latlng);
+    await queryAllLayers(latlng);
+    ctx = { ...(window._lastRestContext||{}), turn_count:(ctx.turn_count||0)+1 };
+    openTopResults();
   } else {
-    // sin punto, al menos incrementa turnos
-    ctx = { ...(ctx||{}), turn_count: (ctx?.turn_count||0)+1 };
+    ctx = { ...(ctx||{}), turn_count:(ctx.turn_count||0)+1 };
   }
 
-  // Preparamos mensajes (enviamos últimos 6 pares para mantener costo bajo)
-  const lastMsgs = history.slice(-10).map(m => ({ role: m.role, content: m.text }));
-  lastMsgs.push({ role:"user", content: text });
+  // Mensajes compactos (últimos 10)
+  const last = hist.slice(-10).map(m=>({role:m.role, content:m.text}));
+  last.push({ role:"user", content:text });
 
   try{
-    const wantCitations = !!swCite.checked || /citas?|enlace|fuente/i.test(text);
-    const out = await chatLLM(lastMsgs, ctx, wantCitations);
-    applyActions(out.actions);
-    if (out.alerts?.length) out.alerts.forEach(a => showToast(a.text, a.level));
+    const wantCites = !!chatCites.checked || /citas?|enlace|fuente/i.test(text);
+    const out = await chatCall(last, ctx, wantCites);
+
+    // Aplica acciones del modelo
+    for (const a of out.actions||[]){
+      if (a.type==="set_marker") placeMarker(L.latLng(a.lat, a.lon));
+      if (a.type==="toggle_layer") toggleLayer(a.layerId, a.on);
+      if (a.type==="fit_bounds" && map) map.fitBounds([[a.bbox[1],a.bbox[0]],[a.bbox[3],a.bbox[2]]], { padding:[30,30] });
+      if (a.type==="reset_view") clearAndReset();
+      if (a.type==="nudge_reload_history") chatHint.classList.add("on");
+    }
+    (out.alerts||[]).forEach(a=> showAppToast(a.text, a.level));
+
     renderChatBubble("assistant", out.reply, out.citations);
 
-    history.push({ role:"user", text, ts:Date.now() });
-    history.push({ role:"assistant", text: out.reply, citations: out.citations, ts:Date.now(), ctx });
-    saveHistory(history);
-
-    if (shouldSuggestReload(history)) historyBar.classList.add("on");
+    hist.push({ role:"user", text, ts:Date.now() });
+    hist.push({ role:"assistant", text: out.reply, citations: out.citations, ts:Date.now(), ctx });
+    saveHistory(hist);
+    if (shouldNudge(hist)) chatHint.classList.add("on");
   }catch(e){
     console.error(e);
-    showToast("No fue posible procesar tu consulta ahora.", "error");
     renderChatBubble("assistant", "No fue posible procesar tu consulta en este momento. Intenta de nuevo.");
   }
 }
-chatSend.addEventListener("click", onUserMessage);
-chatInput.addEventListener("keydown", (e)=>{
-  if (e.key==="Enter" && !e.shiftKey) {
-    e.preventDefault();
-    onUserMessage();
-  }
-});
-btnRecover.addEventListener("click", ()=> {
-  renderHistoryToUI(loadHistory());
-  showToast("Historial recuperado en el panel.", "info");
-});
+chatSend.addEventListener("click", onChatSend);
+chatIn.addEventListener("keydown",(e)=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); onChatSend(); } });
+chatRecover.addEventListener("click", ()=>{ renderHistory(loadHistory()); showAppToast("Historial recuperado.", "info"); });
 
-/* Init */
-renderHistoryToUI(loadHistory());
+/* ================== FIN ================== */
 </script>
+</body>
+</html>
+
