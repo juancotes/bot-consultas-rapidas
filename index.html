@@ -1,159 +1,346 @@
-<!doctype html>
-<html lang="es">
-<head>
-<meta charset="utf-8">
-<title>Tester Worker SIG (/chat y /health)</title>
+<!-- ==== CHAT PANEL (pegar antes de </body>) ==== -->
 <style>
-  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial,sans-serif;max-width:900px;margin:32px auto;padding:0 16px}
-  h1{font-size:20px;margin:0 0 12px}
-  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
-  input[type="text"]{width:100%;max-width:640px;padding:8px;border:1px solid #ccc;border-radius:6px}
-  textarea{width:100%;height:180px;padding:8px;border:1px solid #ccc;border-radius:6px;font-family:ui-monospace,Consolas,monospace}
-  button{padding:8px 12px;border:0;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer}
-  button:disabled{opacity:.6;cursor:progress}
-  .muted{color:#6b7280}
-  .ok{color:#065f46}
-  .bad{color:#7f1d1d}
-  pre{background:#0b1020;color:#e5e7eb;padding:12px;border-radius:8px;overflow:auto}
-  .small{font-size:12px}
+  :root{
+    --chat-bg:#0b1020;        /* consistente con tu app oscura */
+    --chat-panel:#111a34;
+    --chat-muted:#7d8fb3;
+    --chat-accent:#60a5fa;
+    --chat-user:#1f2937;
+    --chat-assistant:#0f172a;
+    --ring:#334155;
+  }
+
+  #chat-toggle {
+    position: fixed; bottom: 16px; right: 16px; z-index: 9999;
+    width: 56px; height: 56px; border-radius: 999px; border: 1px solid #334155;
+    background: var(--chat-panel); color: white; display: grid; place-items: center;
+    box-shadow: 0 6px 24px rgba(0,0,0,.35); cursor: pointer;
+  }
+  #chat-toggle:hover { filter: brightness(1.1); }
+
+  #chat-panel {
+    position: fixed; right: 16px; bottom: 80px; z-index: 9998;
+    width: 380px; max-height: 70dvh; background: var(--chat-panel); color: #e5e7eb;
+    border: 1px solid var(--ring); border-radius: 16px; display: none;
+    box-shadow: 0 20px 48px rgba(0,0,0,.45); overflow: hidden;
+  }
+  #chat-panel.open { display: grid; grid-template-rows: auto 1fr auto; }
+
+  #chat-head {
+    padding: 10px 12px; display: flex; align-items: center; gap: 8px;
+    border-bottom: 1px solid var(--ring); background: #0d142a;
+  }
+  #chat-head h4{ margin:0; font-size: 14px; font-weight:600; }
+  #chat-head .spacer { flex:1; }
+  #chat-body {
+    overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px;
+  }
+  .msg { display: grid; gap: 6px; }
+  .msg .role { font-size: 11px; color: var(--chat-muted); }
+  .msg .bubble {
+    border: 1px solid var(--ring); padding: 10px 12px; border-radius: 14px;
+    line-height: 1.3;
+  }
+  .msg.user   .bubble{ background: var(--chat-user); }
+  .msg.assistant .bubble{ background: var(--chat-assistant); }
+  .citations { font-size: 12px; margin-top: 6px; }
+  .citations a { color: var(--chat-accent); text-decoration: underline; word-break: break-word; }
+
+  #chat-foot {
+    border-top: 1px solid var(--ring); padding: 8px; display: grid; gap: 6px;
+    background: #0d142a;
+  }
+  #chat-controls { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
+  #chat-input {
+    width: 100%; resize: none; min-height: 40px; max-height: 28dvh; padding: 10px 12px;
+    border-radius: 12px; border:1px solid var(--ring); outline:none; background:#0b1020; color:#e5e7eb;
+  }
+  #chat-send {
+    padding: 0 14px; border-radius: 12px; background: var(--chat-accent); border: none; color: #081427;
+    font-weight: 600; cursor: pointer;
+  }
+  #chat-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .switch { display:flex; align-items:center; gap:8px; font-size:12px; color: var(--chat-muted); }
+  .switch input{ width: 16px; height: 16px; }
+
+  #history-bar { display:none; }
+  #history-bar.on { display:flex; align-items:center; justify-content: space-between; gap:8px; }
+  #btn-recover { background: transparent; color: var(--chat-accent); border: 1px solid var(--chat-accent); padding: 6px 10px; border-radius: 10px; cursor: pointer; }
+
+  /* Móvil: panel ocupa toda la pantalla y el toggle sube para no tapar teclado */
+  @media (max-width: 768px) {
+    #chat-panel { left: 0; right: 0; bottom: 0; top: 0; width: 100%; max-height: 100dvh; border-radius: 0; }
+    #chat-toggle { bottom: 20px; right: 20px; }
+  }
 </style>
-</head>
-<body>
-<h1>Tester Cloudflare Worker – SIG</h1>
 
-<div class="row">
-  <label for="url" class="muted small">Endpoint /chat:</label>
-  <input id="url" type="text" value="https://sig-proxy.juan-cotes.workers.dev/chat">
-  <button id="btnChat">Probar /chat (POST)</button>
-  <button id="btnHealth" title="GET /health">Probar /health</button>
+<div id="chat-toggle" title="Abrir chat" aria-label="Abrir chat">
+  <!-- ícono simple -->
+  💬
 </div>
 
-<div class="row">
-  <label><input id="pretty" type="checkbox" checked> Formato bonito</label>
-  <span class="muted small">Origen de esta página: <code id="origin"></code></span>
+<div id="chat-panel" role="dialog" aria-label="Chat SIG">
+  <div id="chat-head">
+    <h4>Consultas por chat</h4>
+    <div class="spacer"></div>
+    <button id="chat-close" title="Cerrar" style="background:transparent;border:0;color:#e5e7eb;font-size:16px;cursor:pointer;">✕</button>
+  </div>
+
+  <div id="chat-body" role="log" aria-live="polite" aria-relevant="additions">
+    <!-- Mensaje de bienvenida -->
+  </div>
+
+  <div id="chat-foot">
+    <div id="history-bar">
+      <small class="muted">Has hecho varias consultas. Para mejorar el contexto, te recomiendo <b>recuperar tu historial</b>.</small>
+      <button id="btn-recover">Recuperar historial</button>
+    </div>
+
+    <div id="chat-meta">
+      <label class="switch" title="Incluir enlaces de consulta en la respuesta">
+        <input id="sw-citations" type="checkbox" />
+        <span>Mostrar enlaces de consulta</span>
+      </label>
+      <small class="muted" style="color:var(--chat-muted);">Solo Colombia / OSM</small>
+    </div>
+
+    <div id="chat-controls">
+      <textarea id="chat-input" placeholder="Escribe una dirección, una URL de Google Maps o una pregunta…" rows="2"></textarea>
+      <button id="chat-send">Enviar</button>
+    </div>
+  </div>
 </div>
-
-<label class="muted small" for="payload">Payload (puedes editarlo):</label>
-<textarea id="payload">{
-  "messages":[{"role":"user","content":"Hola, prueba SIG"}],
-  "context":{"point":{"lat":4.65,"lon":-74.1},"rest":{"intersects":[],"attributes":{}},"turn_count":1},
-  "wantCitations":false
-}</textarea>
-
-<div id="status" class="muted small">Aún sin pruebas…</div>
-
-<h3>Respuesta</h3>
-<pre id="out">—</pre>
-
-<h3>Detalles</h3>
-<pre id="meta" class="small">—</pre>
-
-<h3>Errores</h3>
-<pre id="err" class="small">—</pre>
 
 <script>
-const el = (id)=>document.getElementById(id);
-el('origin').textContent = location.origin || '(sin origin: quizá file://)';
+/* ===== CONFIG ===== */
+const CHAT_ENDPOINT = "https://TU-WORKER.tu-subdominio.workers.dev/chat"; // ← pon aquí tu Worker
+const CHAT_KEY = "geoChatHistory:v1";
+const HISTORY_SUGGEST_TURNS = 6;
 
-function setStatus(text, ok=null, ms=null){
-  const s = el('status');
-  s.className = ok===true ? 'ok' : ok===false ? 'bad' : 'muted small';
-  s.textContent = [text, ms!=null?`(${ms} ms)`:null].filter(Boolean).join(' ');
+/* ===== Helpers UI ===== */
+const $ = (sel) => document.querySelector(sel);
+const chatPanel = $("#chat-panel");
+const chatBody  = $("#chat-body");
+const chatToggle= $("#chat-toggle");
+const chatClose = $("#chat-close");
+const chatInput = $("#chat-input");
+const chatSend  = $("#chat-send");
+const swCite    = $("#sw-citations");
+const historyBar= $("#history-bar");
+const btnRecover= $("#btn-recover");
+
+function openChat(){ chatPanel.classList.add("open"); chatInput.focus(); }
+function closeChat(){ chatPanel.classList.remove("open"); }
+chatToggle.addEventListener("click", openChat);
+chatClose.addEventListener("click", closeChat);
+
+/* Ajuste al teclado móvil */
+if (window.visualViewport) {
+  visualViewport.addEventListener("resize", () => {
+    const offset = (window.innerHeight - visualViewport.height);
+    chatPanel.style.bottom = offset > 0 ? `${offset}px` : "0";
+  });
 }
 
-function pretty(any){
-  const p = el('pretty').checked;
+/* Toast fallback (si no tienes uno global ya) */
+function showToast(text, level="info"){
+  if (window.showAppToast){ window.showAppToast(text, level); return; }
+  // fallback mini-toast
+  const t = document.createElement("div");
+  t.style.position="fixed"; t.style.top="12px"; t.style.left="50%"; t.style.transform="translateX(-50%)";
+  t.style.background= level==="error"?"#7f1d1d": level==="warn"?"#78350f":"#1f2937";
+  t.style.color="#fff"; t.style.padding="8px 12px"; t.style.borderRadius="10px"; t.style.zIndex=99999;
+  t.style.border="1px solid #334155";
+  t.textContent = text;
+  document.body.appendChild(t);
+  setTimeout(()=> t.remove(), 3200);
+}
+
+/* ===== Historial local ===== */
+function loadHistory(){ try{ return JSON.parse(localStorage.getItem(CHAT_KEY)||"[]"); }catch{ return []; } }
+function saveHistory(h){ localStorage.setItem(CHAT_KEY, JSON.stringify(h.slice(-40))); }
+function renderHistoryToUI(h){
+  chatBody.innerHTML = "";
+  renderWelcomeIfEmpty(h);
+  for (const m of h) {
+    if (m.role==="assistant") renderChatBubble("assistant", m.text, m.citations);
+    if (m.role==="user") renderChatBubble("user", m.text);
+  }
+  chatBody.scrollTop = chatBody.scrollHeight;
+}
+function renderWelcomeIfEmpty(h){
+  if (!h || h.length===0) {
+    renderChatBubble("assistant", "Hola 👋. Dime una dirección, pega un enlace de Google Maps o **toca el mapa**. Con eso reviso las capas que intersectan y te respondo en lenguaje natural. Recuerda: solo puedo responder con base en los datos disponibles.");
+  }
+}
+function shouldSuggestReload(h){ return h.filter(m => m.role==="user").length >= HISTORY_SUGGEST_TURNS; }
+
+/* ===== Render de mensajes ===== */
+function renderChatBubble(role, text, citations){
+  const wrap = document.createElement("div");
+  wrap.className = `msg ${role}`;
+  const r = document.createElement("div");
+  r.className = "role";
+  r.textContent = role==="assistant" ? "Asistente" : "Tú";
+  const b = document.createElement("div");
+  b.className = "bubble";
+  b.innerHTML = sanitize(text).replace(/\n/g, "<br/>");
+  wrap.appendChild(r); wrap.appendChild(b);
+
+  if (Array.isArray(citations) && citations.length) {
+    const c = document.createElement("div");
+    c.className = "citations";
+    c.innerHTML = citations.map(ci => `<a href="${ci.url}" target="_blank" rel="noopener noreferrer">${sanitize(ci.label||ci.url)}</a>`).join("<br/>");
+    wrap.appendChild(c);
+  }
+
+  chatBody.appendChild(wrap);
+  chatBody.scrollTop = chatBody.scrollHeight;
+}
+function sanitize(s){ return (s||"").replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])); }
+
+/* ===== Detección básica de entrada ===== */
+function isGMapsUrl(t){ try{ const u=new URL(t.trim()); return /google\.[^/]+\/maps/.test(u.hostname+u.pathname); }catch{return false;} }
+function looksLikeCoords(t){ return /-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?/.test(t); }
+function looksLikeAddress(t){ return !isGMapsUrl(t) && !looksLikeCoords(t) && t.trim().length>3; }
+
+/* ===== Integración con tu app SIG =====
+   Si ya tienes estas funciones globales, las usamos. Si no, hay fallbacks. */
+async function geocodeCO(q){
+  if (typeof window.geocodeCO === "function") return window.geocodeCO(q);
+  // Fallback simple con Nominatim (solo CO)
+  const url = `https://nominatim.openstreetmap.org/search?format=json&countrycodes=co&limit=5&addressdetails=0&q=${encodeURIComponent(q)}`;
+  const r = await fetch(url, { headers:{ "Accept-Language":"es" }});
+  const js = await r.json();
+  if (!js.length) return null;
+  return { lat: parseFloat(js[0].lat), lon: parseFloat(js[0].lon) };
+}
+function parseGMapsUrl(u){
+  if (typeof window.parseGMapsUrl === "function") return window.parseGMapsUrl(u);
   try{
-    if(typeof any === 'string'){
-      const maybe = JSON.parse(any);
-      return p ? JSON.stringify(maybe,null,2) : JSON.stringify(maybe);
+    const url = new URL(u);
+    // soporta .../@lat,lon,zoomz
+    const at = url.href.match(/@(-?\d+(\.\d+)?),(-?\d+(\.\d+)?)/);
+    if (at) return { lat: parseFloat(at[1]), lon: parseFloat(at[3]) };
+  }catch{}
+  return null;
+}
+function setMarker(lat, lon){
+  if (typeof window.setMarker === "function") return window.setMarker(lat, lon);
+  console.warn("setMarker no implementado en global");
+}
+function toggleLayer(id, on){
+  if (typeof window.toggleLayer === "function") return window.toggleLayer(id, on);
+  console.warn("toggleLayer no implementado:", id, on);
+}
+function resetView(){
+  if (typeof window.resetView === "function") return window.resetView();
+  if (window.map && typeof map.setView==="function") map.setView([4.5,-74.2], 6); // fallback Colombia
+}
+function autoToggleIntersecting(intersects){
+  if (typeof window.autoToggleIntersecting === "function") return window.autoToggleIntersecting(intersects);
+  // fallback: prende todo lo intersectado
+  (intersects||[]).forEach(i => toggleLayer(i.layerId, true));
+}
+async function queryAllLayersAt(lat, lon){
+  if (typeof window.queryAllLayersAt === "function") return await window.queryAllLayersAt(lat, lon);
+  console.warn("queryAllLayersAt no implementado. Devuelvo vacío.");
+  return { intersects: [], attributes: {}, bbox: null };
+}
+
+/* ===== Llamada al Worker /chat ===== */
+async function chatLLM(messages, ctx, wantCitations=false){
+  const res = await fetch(CHAT_ENDPOINT, {
+    method:"POST", headers:{ "Content-Type":"application/json" },
+    body: JSON.stringify({ messages, context: ctx, wantCitations })
+  });
+  if (!res.ok) throw new Error("Error en /chat");
+  return await res.json(); // {reply, actions, citations?, alerts?}
+}
+
+/* ===== Aplicar acciones del modelo ===== */
+function applyActions(actions){
+  for (const a of actions||[]){
+    if (a.type==="set_marker") setMarker(a.lat, a.lon);
+    if (a.type==="toggle_layer") toggleLayer(a.layerId, a.on);
+    if (a.type==="fit_bounds" && window.map) {
+      const [[minX,minY,maxX,maxY]] = [[a.bbox[0],a.bbox[1],a.bbox[2],a.bbox[3]]];
+      map.fitBounds([[minY,minX],[maxY,maxX]], { padding:[30,30] });
     }
-    return p ? JSON.stringify(any,null,2) : JSON.stringify(any);
-  }catch{
-    return String(any);
-  }
-}
-
-async function testHealth(){
-  clearOutputs();
-  const base = el('url').value.replace(/\/chat\/?$/,'');
-  const url = base + '/health';
-  const t0 = performance.now();
-  try{
-    const r = await fetch(url, {method:'GET'});
-    const ms = Math.round(performance.now()-t0);
-    const txt = await r.text();
-    setStatus(`GET ${url} → ${r.status} ${r.statusText}`, r.ok, ms);
-    el('out').textContent = pretty(txt);
-    el('meta').textContent = headersToString(r.headers);
-  }catch(err){
-    handleError(err, url);
-  }
-}
-
-async function testChat(){
-  clearOutputs();
-  const url = el('url').value.trim();
-  const body = el('payload').value;
-  const t0 = performance.now();
-  disable(true);
-  try{
-    const r = await fetch(url, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body
-    });
-    const ms = Math.round(performance.now()-t0);
-    const text = await r.text();
-    setStatus(`POST ${url} → ${r.status} ${r.statusText}`, r.ok, ms);
-    el('out').textContent = pretty(text || '(respuesta vacía)');
-    el('meta').textContent = headersToString(r.headers);
-    if(!r.ok){
-      el('err').textContent = `El servidor respondió con estado ${r.status}. Revisa la consola del Worker (Logs → Tail).`;
+    if (a.type==="reset_view") resetView();
+    if (a.type==="nudge_reload_history") {
+      historyBar.classList.add("on");
+      showToast("Has realizado varias consultas. Recupera tu historial para mejorar las respuestas.", "info");
     }
-  }catch(err){
-    handleError(err, url);
-  }finally{
-    disable(false);
   }
 }
 
-function handleError(err, url){
-  setStatus('Fallo de red/fetch', false);
-  const tips = [];
-  if(location.protocol === 'file:'){
-    tips.push('- Estás abriendo el archivo como file://. Usa un servidor local (ej. VSCode Live Server) o pon temporalmente ALLOWED_ORIGIN="*".');
+/* ===== Flujo principal del chat ===== */
+async function onUserMessage(){
+  const text = chatInput.value.trim();
+  if (!text) return;
+  chatInput.value = "";
+  renderChatBubble("user", text);
+
+  const history = loadHistory();
+  // Preliminar: detectar punto
+  let point = null;
+  if (isGMapsUrl(text)) point = parseGMapsUrl(text);
+  else if (looksLikeCoords(text)) {
+    const [lat,lon] = text.split(",").map(s=>parseFloat(s));
+    point = {lat,lon};
+  } else if (looksLikeAddress(text)) {
+    point = await geocodeCO(text);
+    if (!point) showToast("No encontré esa dirección en Colombia.", "warn");
   }
-  tips.push('- Verifica que ALLOWED_ORIGIN coincida EXACTAMENTE con el dominio de esta página.');
-  tips.push('- Revisa que OPENAI_API_KEY esté configurada como Secret en Cloudflare.');
-  el('err').textContent = [
-    `URL: ${url}`,
-    `Error: ${err && err.message ? err.message : err}`,
-    '',
-    'Posibles causas:',
-    ...tips
-  ].join('\n');
-}
 
-function headersToString(headers){
-  const arr = [];
-  headers.forEach((v,k)=>arr.push(`${k}: ${v}`));
-  return arr.length ? arr.join('\n') : '(sin headers)';
-}
+  // Contexto: si tengo punto, consulto capas y prendo intersectadas
+  let ctx = history.at(-1)?.ctx || {};
+  if (point){
+    const { lat, lon } = point;
+    const rest = await queryAllLayersAt(lat, lon);
+    ctx = { point:{lat,lon}, rest, turn_count: (ctx.turn_count||0)+1 };
+    setMarker(lat, lon);
+    autoToggleIntersecting(rest?.intersects||[]);
+  } else {
+    // sin punto, al menos incrementa turnos
+    ctx = { ...(ctx||{}), turn_count: (ctx?.turn_count||0)+1 };
+  }
 
-function clearOutputs(){
-  el('out').textContent = '—';
-  el('meta').textContent = '—';
-  el('err').textContent = '—';
-}
+  // Preparamos mensajes (enviamos últimos 6 pares para mantener costo bajo)
+  const lastMsgs = history.slice(-10).map(m => ({ role: m.role, content: m.text }));
+  lastMsgs.push({ role:"user", content: text });
 
-function disable(on){
-  el('btnChat').disabled = on;
-  el('btnHealth').disabled = on;
-}
+  try{
+    const wantCitations = !!swCite.checked || /citas?|enlace|fuente/i.test(text);
+    const out = await chatLLM(lastMsgs, ctx, wantCitations);
+    applyActions(out.actions);
+    if (out.alerts?.length) out.alerts.forEach(a => showToast(a.text, a.level));
+    renderChatBubble("assistant", out.reply, out.citations);
 
-el('btnChat').addEventListener('click', testChat);
-el('btnHealth').addEventListener('click', testHealth);
+    history.push({ role:"user", text, ts:Date.now() });
+    history.push({ role:"assistant", text: out.reply, citations: out.citations, ts:Date.now(), ctx });
+    saveHistory(history);
+
+    if (shouldSuggestReload(history)) historyBar.classList.add("on");
+  }catch(e){
+    console.error(e);
+    showToast("No fue posible procesar tu consulta ahora.", "error");
+    renderChatBubble("assistant", "No fue posible procesar tu consulta en este momento. Intenta de nuevo.");
+  }
+}
+chatSend.addEventListener("click", onUserMessage);
+chatInput.addEventListener("keydown", (e)=>{
+  if (e.key==="Enter" && !e.shiftKey) {
+    e.preventDefault();
+    onUserMessage();
+  }
+});
+btnRecover.addEventListener("click", ()=> {
+  renderHistoryToUI(loadHistory());
+  showToast("Historial recuperado en el panel.", "info");
+});
+
+/* Init */
+renderHistoryToUI(loadHistory());
 </script>
-</body>
-</html>
