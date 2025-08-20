@@ -1,13 +1,159 @@
-<!doctype html><meta charset="utf-8"><button id="go">Probar</button><pre id="out"></pre>
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Tester Worker SIG (/chat y /health)</title>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,'Helvetica Neue',Arial,sans-serif;max-width:900px;margin:32px auto;padding:0 16px}
+  h1{font-size:20px;margin:0 0 12px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
+  input[type="text"]{width:100%;max-width:640px;padding:8px;border:1px solid #ccc;border-radius:6px}
+  textarea{width:100%;height:180px;padding:8px;border:1px solid #ccc;border-radius:6px;font-family:ui-monospace,Consolas,monospace}
+  button{padding:8px 12px;border:0;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer}
+  button:disabled{opacity:.6;cursor:progress}
+  .muted{color:#6b7280}
+  .ok{color:#065f46}
+  .bad{color:#7f1d1d}
+  pre{background:#0b1020;color:#e5e7eb;padding:12px;border-radius:8px;overflow:auto}
+  .small{font-size:12px}
+</style>
+</head>
+<body>
+<h1>Tester Cloudflare Worker – SIG</h1>
+
+<div class="row">
+  <label for="url" class="muted small">Endpoint /chat:</label>
+  <input id="url" type="text" value="https://sig-proxy.juan-cotes.workers.dev/chat">
+  <button id="btnChat">Probar /chat (POST)</button>
+  <button id="btnHealth" title="GET /health">Probar /health</button>
+</div>
+
+<div class="row">
+  <label><input id="pretty" type="checkbox" checked> Formato bonito</label>
+  <span class="muted small">Origen de esta página: <code id="origin"></code></span>
+</div>
+
+<label class="muted small" for="payload">Payload (puedes editarlo):</label>
+<textarea id="payload">{
+  "messages":[{"role":"user","content":"Hola, prueba SIG"}],
+  "context":{"point":{"lat":4.65,"lon":-74.1},"rest":{"intersects":[],"attributes":{}},"turn_count":1},
+  "wantCitations":false
+}</textarea>
+
+<div id="status" class="muted small">Aún sin pruebas…</div>
+
+<h3>Respuesta</h3>
+<pre id="out">—</pre>
+
+<h3>Detalles</h3>
+<pre id="meta" class="small">—</pre>
+
+<h3>Errores</h3>
+<pre id="err" class="small">—</pre>
+
 <script>
-const API="https://sig-proxy.juan-cotes.workers.dev/chat";
-document.getElementById('go').onclick=async()=>{
-  const payload={
-    messages:[{role:"user",content:"Hola, prueba SIG"}],
-    context:{point:{lat:4.65,lon:-74.1},rest:{intersects:[],attributes:{}}},
-    wantCitations:false
-  };
-  const r=await fetch(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
-  document.getElementById('out').textContent=await r.text();
-};
+const el = (id)=>document.getElementById(id);
+el('origin').textContent = location.origin || '(sin origin: quizá file://)';
+
+function setStatus(text, ok=null, ms=null){
+  const s = el('status');
+  s.className = ok===true ? 'ok' : ok===false ? 'bad' : 'muted small';
+  s.textContent = [text, ms!=null?`(${ms} ms)`:null].filter(Boolean).join(' ');
+}
+
+function pretty(any){
+  const p = el('pretty').checked;
+  try{
+    if(typeof any === 'string'){
+      const maybe = JSON.parse(any);
+      return p ? JSON.stringify(maybe,null,2) : JSON.stringify(maybe);
+    }
+    return p ? JSON.stringify(any,null,2) : JSON.stringify(any);
+  }catch{
+    return String(any);
+  }
+}
+
+async function testHealth(){
+  clearOutputs();
+  const base = el('url').value.replace(/\/chat\/?$/,'');
+  const url = base + '/health';
+  const t0 = performance.now();
+  try{
+    const r = await fetch(url, {method:'GET'});
+    const ms = Math.round(performance.now()-t0);
+    const txt = await r.text();
+    setStatus(`GET ${url} → ${r.status} ${r.statusText}`, r.ok, ms);
+    el('out').textContent = pretty(txt);
+    el('meta').textContent = headersToString(r.headers);
+  }catch(err){
+    handleError(err, url);
+  }
+}
+
+async function testChat(){
+  clearOutputs();
+  const url = el('url').value.trim();
+  const body = el('payload').value;
+  const t0 = performance.now();
+  disable(true);
+  try{
+    const r = await fetch(url, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body
+    });
+    const ms = Math.round(performance.now()-t0);
+    const text = await r.text();
+    setStatus(`POST ${url} → ${r.status} ${r.statusText}`, r.ok, ms);
+    el('out').textContent = pretty(text || '(respuesta vacía)');
+    el('meta').textContent = headersToString(r.headers);
+    if(!r.ok){
+      el('err').textContent = `El servidor respondió con estado ${r.status}. Revisa la consola del Worker (Logs → Tail).`;
+    }
+  }catch(err){
+    handleError(err, url);
+  }finally{
+    disable(false);
+  }
+}
+
+function handleError(err, url){
+  setStatus('Fallo de red/fetch', false);
+  const tips = [];
+  if(location.protocol === 'file:'){
+    tips.push('- Estás abriendo el archivo como file://. Usa un servidor local (ej. VSCode Live Server) o pon temporalmente ALLOWED_ORIGIN="*".');
+  }
+  tips.push('- Verifica que ALLOWED_ORIGIN coincida EXACTAMENTE con el dominio de esta página.');
+  tips.push('- Revisa que OPENAI_API_KEY esté configurada como Secret en Cloudflare.');
+  el('err').textContent = [
+    `URL: ${url}`,
+    `Error: ${err && err.message ? err.message : err}`,
+    '',
+    'Posibles causas:',
+    ...tips
+  ].join('\n');
+}
+
+function headersToString(headers){
+  const arr = [];
+  headers.forEach((v,k)=>arr.push(`${k}: ${v}`));
+  return arr.length ? arr.join('\n') : '(sin headers)';
+}
+
+function clearOutputs(){
+  el('out').textContent = '—';
+  el('meta').textContent = '—';
+  el('err').textContent = '—';
+}
+
+function disable(on){
+  el('btnChat').disabled = on;
+  el('btnHealth').disabled = on;
+}
+
+el('btnChat').addEventListener('click', testChat);
+el('btnHealth').addEventListener('click', testHealth);
 </script>
+</body>
+</html>
