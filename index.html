@@ -1,10 +1,13 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-  <meta charset="UTF-8">
-  <title>Hola Mundo</title>
-</head>
-<body>
-  <h1>Hola mundo</h1>
-</body>
-</html>
+<!doctype html><meta charset="utf-8"><button id="go">Probar</button><pre id="out"></pre>
+<script>
+const API="https://sig-proxy.juan-cotes.workers.dev/chat";
+document.getElementById('go').onclick=async()=>{
+  const payload={
+    messages:[{role:"user",content:"Hola, prueba SIG"}],
+    context:{point:{lat:4.65,lon:-74.1},rest:{intersects:[],attributes:{}}},
+    wantCitations:false
+  };
+  const r=await fetch(API,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+  document.getElementById('out').textContent=await r.text();
+};
+</script>
