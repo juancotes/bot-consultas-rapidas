@@ -894,6 +894,18 @@
 <script>
 /* ===== CONFIG ===== */
 const CHAT_ENDPOINT = "https://sig-proxy.juan-cotes.workers.dev/chat"; // ← AQUÍ VA EL Worker
+  
+// ===== NUEVO: endpoint de streaming + chatId persistente =====
+const CHAT_STREAM_ENDPOINT = CHAT_ENDPOINT.replace(/\/chat$/, "/chat/stream");
+const CHAT_ID_KEY = "geoChatId:v1";
+let CHAT_ID = localStorage.getItem(CHAT_ID_KEY);
+if (!CHAT_ID) {
+  CHAT_ID = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+  localStorage.setItem(CHAT_ID_KEY, CHAT_ID);
+}
+// =============================================================
+
+  
 const CHAT_KEY = "geoChatHistory:v1";
 const HISTORY_SUGGEST_TURNS = 6;
 
