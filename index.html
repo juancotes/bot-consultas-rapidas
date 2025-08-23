@@ -1133,21 +1133,74 @@ async function onUserMessage(){
 
   try{
     const wantCitations = !!swCite.checked || /citas?|enlace|fuente/i.test(text);
-    const out = await chatLLM(lastMsgs, ctx, wantCitations);
-    applyActions(out.actions);
-    (out.alerts||[]).forEach(a => showChatToast(a.text, a.level||"info"));
-    renderChatBubble("assistant", out.reply, out.citations);
 
-    history.push({ role:"user", text, ts:Date.now() });
-    history.push({ role:"assistant", text: out.reply, citations: out.citations, ts:Date.now(), ctx });
-    saveHistory(history);
+    // Construir historial compacto para enviar
+    const history = loadHistory();
+    const lastMsgs = history.slice(-10).map(m => ({ role: m.role, content: m.text }));
+    lastMsgs.push({ role:"user", content: text });
 
-    if (shouldSuggestReload(history)) historyBar.classList.add("on");
+    // Placeholder que se irá llenando token a token
+    const ph = makeAssistantPlaceholder();
+
+    // STREAMING primero (si falla, caemos a no-stream)
+    let gotFinal = false;
+    await chatLLMStream(
+      lastMsgs, ctx, wantCitations,
+      // onToken
+      (t)=>{ ph.bubble.innerHTML += sanitizeChat(t).replace(/\n/g,"<br/>"); chatBody.scrollTop = chatBody.scrollHeight; },
+      // onFinal
+      (out)=> {
+        gotFinal = true;
+        applyActions(out.actions);
+        (out.alerts||[]).forEach(a => showChatToast(a.text, a.level||"info"));
+
+        // Reemplaza contenido por la respuesta final "limpia"
+        ph.bubble.innerHTML = sanitizeChat(out.reply).replace(/\n/g,"<br/>");
+
+        // Citas (si las hay)
+        if (Array.isArray(out.citations) && out.citations.length){
+          const c = document.createElement("div");
+          c.className = "citations";
+          c.innerHTML = out.citations.map(ci => `<a href="${ci.url}" target="_blank" rel="noopener noreferrer">${sanitizeChat(ci.label||ci.url)}</a>`).join("<br/>");
+          ph.wrap.appendChild(c);
+        }
+
+        // Guardar historial local con el contexto más reciente
+        history.push({ role:"user", text, ts:Date.now() });
+        history.push({ role:"assistant", text: out.reply, citations: out.citations, ts:Date.now(), ctx });
+        saveHistory(history);
+        if (shouldSuggestReload(history)) historyBar.classList.add("on");
+      },
+      // onError → fallback no streaming
+      async (msg)=> {
+        console.warn("SSE error/fallback:", msg);
+        const out = await chatLLM(lastMsgs, ctx, wantCitations); // fallback
+        applyActions(out.actions);
+        (out.alerts||[]).forEach(a => showChatToast(a.text, a.level||"info"));
+        ph.bubble.innerHTML = sanitizeChat(out.reply).replace(/\n/g,"<br/>");
+        if (Array.isArray(out.citations) && out.citations.length){
+          const c = document.createElement("div");
+          c.className = "citations";
+          c.innerHTML = out.citations.map(ci => `<a href="${ci.url}" target="_blank" rel="noopener noreferrer">${sanitizeChat(ci.label||ci.url)}</a>`).join("<br/>");
+          ph.wrap.appendChild(c);
+        }
+        history.push({ role:"user", text, ts:Date.now() });
+        history.push({ role:"assistant", text: out.reply, citations: out.citations, ts:Date.now(), ctx });
+        saveHistory(history);
+        if (shouldSuggestReload(history)) historyBar.classList.add("on");
+      }
+    );
+
+    // Por si el stream terminó sin “final” (raro), evita que quede vacío
+    if (!gotFinal && ph.bubble.innerHTML.trim() === "") {
+      ph.bubble.innerHTML = "<span class='small'>No fue posible completar la respuesta.</span>";
+    }
   }catch(e){
     console.error(e);
     showChatToast("No fue posible procesar tu consulta ahora.", "error");
     renderChatBubble("assistant", "No fue posible procesar tu consulta en este momento. Intenta de nuevo.");
   }
+
 }
 chatSend.addEventListener("click", onUserMessage);
 chatInput.addEventListener("keydown", (e)=>{
