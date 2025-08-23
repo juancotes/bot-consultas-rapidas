@@ -1195,11 +1195,15 @@ async function onUserMessage(){
     if (!gotFinal && ph.bubble.innerHTML.trim() === "") {
       ph.bubble.innerHTML = "<span class='small'>No fue posible completar la respuesta.</span>";
     }
-  }catch(e){
-    console.error(e);
-    showChatToast("No fue posible procesar tu consulta ahora.", "error");
-    renderChatBubble("assistant", "No fue posible procesar tu consulta en este momento. Intenta de nuevo.");
-  }
+} catch(e) {
+  console.error(e);
+  showChatToast("El bot no está disponible.", "error");
+  renderChatBubble(
+    "assistant",
+    "Lo sentimos, en el momento el bot no está disponible :( Pero puedes usar las otras funciones del ¡geovisor!"
+  );
+}
+
 
 }
 chatSend.addEventListener("click", onUserMessage);
