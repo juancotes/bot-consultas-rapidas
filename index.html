@@ -1033,15 +1033,53 @@ async function queryAllLayersAt(lat, lon){
 }
 
 /* ===== Llamada al Worker /chat ===== */
+/* ===== Llamada al Worker /chat ===== */
 async function chatLLM(messages, ctx, wantCitations=false){
   const res = await fetch(CHAT_ENDPOINT, {
-    method:"POST", headers:{ "Content-Type":"application/json" },
-    body: JSON.stringify({ messages, context: ctx, wantCitations })
+    method:"POST",
+    headers:{ "Content-Type":"application/json", "X-Chat-Id": CHAT_ID },
+    body: JSON.stringify({ messages, context: ctx, wantCitations, chatId: CHAT_ID })
   });
   if (!res.ok) throw new Error("Error en /chat");
-  return await res.json(); // {reply, actions, citations?, alerts?}
+  return await res.json(); // {reply, actions, citations?, alerts?, chatId?}
 }
 
+/* ===== NUEVO: llamada streaming /chat/stream (SSE) ===== */
+async function chatLLMStream(messages, ctx, wantCitations, onToken, onFinal, onError){
+  const res = await fetch(CHAT_STREAM_ENDPOINT, {
+    method:"POST",
+    headers:{ "Content-Type":"application/json", "X-Chat-Id": CHAT_ID },
+    body: JSON.stringify({ messages, context: ctx, wantCitations, chatId: CHAT_ID })
+  });
+  if (!res.ok || !res.body) { onError?.(await res.text()); return; }
+
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const parts = buf.split("\n\n");
+    buf = parts.pop() || "";
+
+    for (const part of parts) {
+      const lines = part.split("\n");
+      const ev = (lines.find(l => l.startsWith("event:")) || "").replace(/^event:\s?/, "") || "message";
+      const dataLine = (lines.find(l => l.startsWith("data:")) || "").replace(/^data:\s?/, "");
+      if (!dataLine) continue;
+
+      if (ev === "token") {
+        try { const { t } = JSON.parse(dataLine); onToken?.(t || ""); } catch {}
+      } else if (ev === "final") {
+        try { const obj = JSON.parse(dataLine); onFinal?.(obj); } catch (e) { onError?.(String(e)); }
+      } else if (ev === "error") {
+        try { const obj = JSON.parse(dataLine); onError?.(obj?.message || "error"); } catch {}
+      }
+    }
+  }
+}
 /* ===== Aplicar acciones del modelo ===== */
 function applyActions(actions){
   for (const a of actions||[]){
