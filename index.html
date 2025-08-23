@@ -989,6 +989,18 @@ function renderChatBubble(role, text, citations){
   chatBody.scrollTop = chatBody.scrollHeight;
 }
 
+// ===== NUEVO: burbuja de asistente "placeholder" para streaming =====
+function makeAssistantPlaceholder(){
+  const wrap = document.createElement("div");
+  wrap.className = "msg assistant";
+  const r = document.createElement("div"); r.className = "role"; r.textContent = "Asistente";
+  const b = document.createElement("div"); b.className = "bubble"; b.innerHTML = "";
+  wrap.appendChild(r); wrap.appendChild(b);
+  chatBody.appendChild(wrap);
+  chatBody.scrollTop = chatBody.scrollHeight;
+  return { wrap, bubble: b };
+}
+
 /* ===== Detección básica de entrada ===== */
 function isGMapsUrl(t){ try{ const u=new URL(t.trim()); return /google\.[^/]+\/maps/.test(u.hostname+u.pathname); }catch{return false;} }
 function looksLikeCoords(t){ return /-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?/.test(t); }
